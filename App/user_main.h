@@ -11,7 +11,8 @@
 #define LCD_PAGE_OUTPUT_INFO    (0)
 #define LCD_PAGE_SET            (1)
 #define LCD_PAGE_PKT            (2)
-#define LCD_PAGE_NUM            (3)
+#define LCD_PAGE_VER            (3)
+#define LCD_PAGE_NUM            (4)
 
 
 

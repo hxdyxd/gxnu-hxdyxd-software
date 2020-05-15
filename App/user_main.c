@@ -133,6 +133,10 @@ void lcd_flush_proc(void)
         lcd1602_clear();
         lcd_printf(0, 0, "PKT:%d", lost_cnt);
         break;
+    case LCD_PAGE_VER:
+        lcd_printf(0, 0, "%s", __DATE__);
+        lcd_printf(0, 1, "Time:%s", __TIME__);
+        break;
     default:
         lcd1602_clear();
         break;
@@ -258,7 +262,7 @@ void usart_rx_callback(uint8_t *data, uint8_t len)
     case 'e':
         //master slave set
         global_data.is_master = !global_data.is_master;
-        fsk_comm_set_mode(global_data.is_master ? TX_FLAG : RX_FLAG);
+        fsk_comm_set_mode(/*global_data.is_master ? TX_FLAG :*/ RX_FLAG);
         break;
     case 'f':
         //vlotage current set
@@ -282,24 +286,25 @@ void fsk_data_callback(uint8_t *data, uint16_t len)
         tmp = GET_ADC(VRMS)*1000;
         data[2] = tmp >> 8;
         data[3] = tmp & 0xff;
-				if(global_data.is_voltage)
-						pid_set_value(&global_data.voltage_controller, global_data.voltage_set );
-				else
-						pid_set_value(&global_data.current_controller, global_data.current_set );
+        hal32_usart3_write(data, 4);
+        if(global_data.is_voltage)
+            pid_set_value(&global_data.voltage_controller, global_data.voltage_set );
+        else
+            pid_set_value(&global_data.current_controller, global_data.current_set );
         //type: 
     } else {
         uint16_t tmp = 0;
         tmp = (data[0] << 8) | data[1];
-				if(!global_data.is_voltage) {
-						pid_set_value(&global_data.current_controller, tmp*0.001);
-				}
-        printf("Ims:%.3f\r\n", tmp*0.001);
+        if(!global_data.is_voltage) {
+                pid_set_value(&global_data.current_controller, tmp*0.001);
+        }
+        //printf("Ims:%.3f\r\n", tmp*0.001);
 				
         tmp = (data[2] << 8) | data[3];
-				if(global_data.is_voltage) {
-						pid_set_value(&global_data.voltage_controller, tmp*0.001);
-				}
-        printf("Vms:%.3f\r\n", tmp*0.001);
+        if(global_data.is_voltage) {
+                pid_set_value(&global_data.voltage_controller, tmp*0.001);
+        }
+        //printf("Vms:%.3f\r\n", tmp*0.001);
         global_data.sync_keep_time = hal_read_TickCounter();
     }
 }
@@ -333,6 +338,7 @@ void adc_rx_callback(int id, void *pbuf, int len)
     
     value_adc_physical_set(ADC_12BIT_VOLTAGE_CALCULATE(current_val), IRMS);
     value_adc_physical_set(ADC_12BIT_VOLTAGE_CALCULATE(voltage_val), VRMS);
+    GET_ADC(VRMS) = GET_ADC(VRMS)*0.990+0.486;
     
     //pid controller
     pid_controller_proc();
@@ -370,7 +376,7 @@ void user_setup(void)
     
     lcd1602_write_string(0, 0, "hello");
     lcd1602_write_string(0, 1, "stm32");
-    fsk_comm_set_mode(global_data.is_master ? TX_FLAG : RX_FLAG);
+    fsk_comm_set_mode(/*global_data.is_master ? TX_FLAG :*/ RX_FLAG);
 }
 
 

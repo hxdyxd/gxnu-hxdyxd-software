@@ -69,6 +69,18 @@ void hal32_usart_write(uint8_t *p, uint8_t len)
 }
 
 
+void hal32_usart3_write(uint8_t *p, uint8_t len)
+{
+    static uint32_t timer = 0;
+#if 1
+    if(hal_read_TickCounter() - timer < 12)
+        return;
+#else
+    while(hal_read_TickCounter() - timer < 12);
+#endif
+    HAL_UART_Transmit(&huart3, p, len, 100);
+    timer = hal_read_TickCounter();
+}
 
 /*********************************UART**************************************************/
 /*****************************END OF FILE***************************/
