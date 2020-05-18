@@ -7,40 +7,21 @@
 #include "user_main.h"
 #include "function_task.h"
 #include "soft_timer.h"
-#include "adc_algorithm.h"
 
 #define MASTER     (1)
 //int cnt = 0;
 
-struct gData_t{
-    uint32_t rx_pack_cnt;
-    uint8_t lcd_page;
-    uint8_t lcd_page_set;
-    pidc_t voltage_controller;
-    pidc_t current_controller;
-    uint16_t dyty_cycle_max;
-    uint16_t dyty_cycle_min;
-    uint8_t is_master;
-    uint8_t is_sync;
-    uint8_t is_output;
-	uint8_t is_voltage;
-    uint32_t sync_keep_time;
-	float voltage_set;
-	float current_set;
-//    uint16_t adc_voltage_buffer[ADC1_CONV_NUMBER];
-//    uint16_t adc_current_buffer[ADC1_CONV_NUMBER];
-//    uint8_t adc_buffer_ready;
-    
-} global_data = {
+
+static struct gData_t global_data = {
     .rx_pack_cnt = 0,
-    .lcd_page = LCD_PAGE_OUTPUT_INFO,
+    .lcd_page = LCD_PAGE_WELCOME,
     .dyty_cycle_max = 0,
     .dyty_cycle_min = PWM_MAX_V,
 #if MASTER
     .is_master = 1,
     .is_sync = 0,
     .is_output = 0,
-	.is_voltage = 0,
+	.is_voltage = 1,
 #else
     .is_master = 0,
     .is_sync = 0,
@@ -73,7 +54,7 @@ struct gData_t{
 uint8_t lost_cnt = 0;
 
 
-void pid_controller_proc(void)
+static void pid_controller_proc(void)
 {
     float current_val;
     pidc_t *pcontroller = NULL;
@@ -97,13 +78,36 @@ void pid_controller_proc(void)
 }
 
 
-
-void lcd_flush_proc(void)
+static void set_pid_value_in_master_mode(void)
 {
+    if(global_data.is_master) {
+        pid_set_value(&global_data.voltage_controller, global_data.voltage_set );
+        pid_set_value(&global_data.current_controller, global_data.current_set );
+    }
+}
+
+static void set_output_status(void)
+{
+    if(global_data.is_output)
+        LED_HIGH(RELAY_OUT);
+    else
+        LED_LOW(RELAY_OUT);
+}
+
+
+/* output info */
+static void lcd_flush_proc(void)
+{
+    uint8_t show_status = 1;
     switch(global_data.lcd_page) {
+    case LCD_PAGE_WELCOME:
+        lcd1602_write_string(0, 0, "SineWaveInverter");
+        lcd1602_write_string(0, 1, "Yan_Xiangdong");
+        show_status = 0;
+        break;
     case LCD_PAGE_OUTPUT_INFO:
         for(int i=0;i<ADC1_CHANNEL_NUMBER;i++) {
-            if(!global_data.is_master && i==IRMS) {
+            if(!global_data.is_master && i == IRMS) {
                 lcd_printf(0, i, "%s:%.3f_%.3f", GET_ADC_INFO(i), GET_ADC(i), global_data.current_controller.setval);
             } else {
                 lcd_printf(0, i, "%s:%.3f", GET_ADC_INFO(i), GET_ADC(i) );
@@ -113,8 +117,8 @@ void lcd_flush_proc(void)
 	case LCD_PAGE_SET:
         switch(global_data.lcd_page_set) {
         case LCD_PAGE_SET_DEFAULT:
-            lcd_printf(0, 0, "Iset:%.3f", global_data.current_set );
-            lcd_printf(0, 1, "Vset:%.3f", global_data.voltage_set );
+            lcd_printf(0, 0, "Vset:%.3f", global_data.voltage_set );
+            lcd_printf(0, 1, "Iset:%.3f", global_data.current_set );
             break;
         case LCD_PAGE_SET_VOLTAGE:
             lcd_printf(0, 0, "V set mode");
@@ -134,29 +138,33 @@ void lcd_flush_proc(void)
         lcd_printf(0, 0, "PKT:%d", lost_cnt);
         break;
     case LCD_PAGE_VER:
-        lcd_printf(0, 0, "%s", __DATE__);
+        lcd_printf(0, 0, "Date:%s", __DATE__);
         lcd_printf(0, 1, "Time:%s", __TIME__);
+        show_status = 0;
         break;
     default:
         lcd1602_clear();
         break;
     }
-    uint8_t icon = 15;
-		if(global_data.is_voltage) {
-				lcd1602_write_char(icon--, 0, 'V');
-		} else {
-				lcd1602_write_char(icon--, 0, 'A');
-		}
-		
-    if(global_data.is_master) {
-        lcd1602_write_char(icon--, 0, 'M');
-    } else {
-        lcd1602_write_char(icon--, 0, 'S');
-        if(global_data.is_sync)
-            lcd1602_write_char(icon--, 0, 'T');
-    }
-    if(global_data.is_output) {
-        lcd1602_write_char(icon--, 0, 'O');
+    
+    if(show_status) {
+        uint8_t icon = 15;
+        if(global_data.is_voltage) {
+            lcd1602_write_char(icon--, 0, 'V');
+        } else {
+            lcd1602_write_char(icon--, 0, 'A');
+        }
+        
+        if(global_data.is_master) {
+            lcd1602_write_char(icon--, 0, 'M');
+        } else {
+            lcd1602_write_char(icon--, 0, 'S');
+            if(global_data.is_sync)
+                lcd1602_write_char(icon--, 0, 'T');
+        }
+        if(global_data.is_output) {
+            lcd1602_write_char(icon--, 0, 'O');
+        }
     }
     
     APP_DEBUG("ADC_INFO ");
@@ -173,7 +181,8 @@ void lcd_flush_proc(void)
     global_data.dyty_cycle_max = 0;
     
     APP_DEBUG("status:%s\n", (global_data.is_master)?"M":"S");
-    
+   
+//    MATLAB DEBUG
 //    static uint32_t previous_cnt = 0;
 //    
 //    printf("%d\n", cnt - previous_cnt);
@@ -191,7 +200,7 @@ void lcd_flush_proc(void)
 }
 
 
-void usart_rx_callback(uint8_t *data, uint8_t len)
+static void usart_rx_callback(uint8_t *data, uint8_t len)
 {
     data[len] = 0;
     lcd1602_write_string(15, 1, (char *)data);
@@ -200,6 +209,7 @@ void usart_rx_callback(uint8_t *data, uint8_t len)
         //ok
         switch(global_data.lcd_page) {
         case LCD_PAGE_SET:
+            //page_set next
             global_data.lcd_page_set = (global_data.lcd_page_set + 1) % LCD_PAGE_SET_NUM;
             break;
         default:
@@ -211,15 +221,34 @@ void usart_rx_callback(uint8_t *data, uint8_t len)
         switch(global_data.lcd_page) {
         case LCD_PAGE_SET:
             switch(global_data.lcd_page_set) {
+            case LCD_PAGE_SET_DEFAULT:
+                //page previous
+                if(global_data.lcd_page == 0) {
+                    global_data.lcd_page = LCD_PAGE_NUM;
+                }
+                global_data.lcd_page--;
+                break;
             case LCD_PAGE_SET_VOLTAGE:
-                global_data.voltage_set -= 1;
+                //voltage_set sub
+                if(global_data.voltage_set > 0) {
+                    global_data.voltage_set -= 1;
+                }
                 break;
             case LCD_PAGE_SET_CURRENT:
-                global_data.current_set -= 0.1;
+                //current_set sub
+                if(global_data.current_set > 0) {
+                    global_data.current_set -= 0.1;
+                }
                 break;
             }
+            set_pid_value_in_master_mode();
             break;
         default:
+            //page previous
+            if(global_data.lcd_page == 0) {
+                global_data.lcd_page = LCD_PAGE_NUM;
+            }
+            global_data.lcd_page--;
             break;
         }
         break;
@@ -228,44 +257,48 @@ void usart_rx_callback(uint8_t *data, uint8_t len)
         switch(global_data.lcd_page) {
         case LCD_PAGE_SET:
             switch(global_data.lcd_page_set) {
+            case LCD_PAGE_SET_DEFAULT:
+                //page next
+                global_data.lcd_page = (global_data.lcd_page + 1) % LCD_PAGE_NUM;
+                break;
             case LCD_PAGE_SET_VOLTAGE:
-                global_data.voltage_set += 1;
+                //voltage_set add
+                if(global_data.voltage_set < 15) {
+                    global_data.voltage_set += 1;
+                }
                 break;
             case LCD_PAGE_SET_CURRENT:
-                global_data.current_set += 0.1;
+                //current_set add
+                if(global_data.current_set < 3) {
+                    global_data.current_set += 0.1;
+                }
                 break;
             }
+            set_pid_value_in_master_mode();
             break;
         default:
+            //page next
+            global_data.lcd_page = (global_data.lcd_page + 1) % LCD_PAGE_NUM;
             break;
         }
         break;
     case 'c':
         //output set
         global_data.is_output = !global_data.is_output;
-        if(global_data.is_output)
-            LED_HIGH(RELAY_OUT);
-        else
-            LED_LOW(RELAY_OUT);
+        if(!global_data.is_master && !global_data.is_sync) {
+            //Slave must be synchronized
+            global_data.is_output = 0;
+        }
+        //update relay
+        set_output_status();
         break;
     case 'd':
-        //page next
-        global_data.lcd_page = (global_data.lcd_page + 1) % LCD_PAGE_NUM;
-        switch(global_data.lcd_page) {
-        case LCD_PAGE_SET:
-            global_data.lcd_page_set = LCD_PAGE_SET_DEFAULT;
-            break;
-        default:
-            break;
-        }
-        break;
-    case 'e':
-        //master slave set
+        //master & slave set
         global_data.is_master = !global_data.is_master;
         fsk_comm_set_mode(/*global_data.is_master ? TX_FLAG :*/ RX_FLAG);
         break;
-    case 'f':
-        //vlotage current set
+    case 'e':
+        //vlotage & current set
 		global_data.is_voltage = !global_data.is_voltage;
         break;
     default:
@@ -274,7 +307,7 @@ void usart_rx_callback(uint8_t *data, uint8_t len)
 }
 
 
-void fsk_data_callback(uint8_t *data, uint16_t len)
+static void fsk_data_callback(uint8_t *data, uint16_t len)
 {
     global_data.rx_pack_cnt++;
     LED_REV(LED_BASE);
@@ -286,12 +319,7 @@ void fsk_data_callback(uint8_t *data, uint16_t len)
         tmp = GET_ADC(VRMS)*1000;
         data[2] = tmp >> 8;
         data[3] = tmp & 0xff;
-        hal32_usart3_write(data, 4);
-        if(global_data.is_voltage)
-            pid_set_value(&global_data.voltage_controller, global_data.voltage_set );
-        else
-            pid_set_value(&global_data.current_controller, global_data.current_set );
-        //type: 
+        hal32_usart3_write(data, 4); //Send value to FSK Transmiter by USART3
     } else {
         uint16_t tmp = 0;
         tmp = (data[0] << 8) | data[1];
@@ -310,7 +338,7 @@ void fsk_data_callback(uint8_t *data, uint16_t len)
 }
 
 
-void adc_rx_callback(int id, void *pbuf, int len)
+static void adc_rx_callback(int id, void *pbuf, int len)
 {
     ADC1_PBUF_TYPE adc1pbuf = (ADC1_PBUF_TYPE)pbuf;
     //Izero
@@ -342,6 +370,7 @@ void adc_rx_callback(int id, void *pbuf, int len)
     
     //pid controller
     pid_controller_proc();
+//    MATLAB DEBUG
 //    cnt++;
 //    if(cnt%64 == 0) {
 //        for(int i=0;i<ADC1_CONV_NUMBER;i++) {
@@ -353,6 +382,8 @@ void adc_rx_callback(int id, void *pbuf, int len)
     TIMER_TASK(timer0, SYNC_TIMEOUT/4, (!global_data.is_master) ) {
         if(SYNC_TIMEOUT < hal_read_TickCounter() - global_data.sync_keep_time) {
             global_data.is_sync = 0;
+            global_data.is_output = 0;
+            set_output_status();
             pid_set_value(&global_data.current_controller, 0);
         } else {
             global_data.is_sync = 1;
@@ -367,16 +398,16 @@ void user_system_setup(void)
 
 void user_setup(void)
 {
-    PRINTF("\r\n\r\n[Sine Wave Inverters] Build , %s %s \r\n", __DATE__, __TIME__);
+    PRINTF("\r\n\r\n[Sine Wave Inverter] Build , %s %s \r\n", __DATE__, __TIME__);
     
     data_interface_hal_init();
     
     soft_timer_init();
     soft_timer_create(0, 1, 1, lcd_flush_proc, 500);
     
-    lcd1602_write_string(0, 0, "hello");
-    lcd1602_write_string(0, 1, "stm32");
     fsk_comm_set_mode(/*global_data.is_master ? TX_FLAG :*/ RX_FLAG);
+    set_pid_value_in_master_mode();  //update pid set value
+    set_output_status(); //update relay
 }
 
 
