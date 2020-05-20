@@ -12,20 +12,14 @@
 
 #include "gpio.h"
 #include "tim.h"
-#include "tim.h"
 #include "usart.h"
-//#include "key_inout.h"
-//#include "hal32_usart.h"
+#include "i2c.h"
 #include "sine_pwm_control.h"
 #include "lcd1602.h"
 #include "hal32_usart.h"
 #include "spi_hal.h"
 #include "hal32_adc.h"
 #include "fsk_communication.h"
-
-//UART
-#define UART_BUFFER_SIZE     (256)
-#define USART_RX_TIMEOUT_MS  (10)
 
 
 //ENCODER

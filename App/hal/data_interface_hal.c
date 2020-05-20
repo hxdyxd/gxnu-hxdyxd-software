@@ -16,6 +16,7 @@
 
 void data_interface_hal_init(void)
 {
+    sine_wave_table_init();
     sine_wave_set_table(950);
     sine_wave_set_status(1);
     

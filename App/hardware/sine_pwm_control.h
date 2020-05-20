@@ -19,6 +19,7 @@
 
 
 uint16_t sine_wave_get_dutycycle_maxval(void);
+void sine_wave_table_init(void);
 void sine_wave_set_table(uint16_t max);
 void sine_wave_set_status(uint8_t enable);
 

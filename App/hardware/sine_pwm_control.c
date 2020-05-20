@@ -8,13 +8,26 @@
 #include "tim.h"
 #include "sine_pwm_control.h"
 
-
+static uint32_t PWM_Sin_Table[SAMP_PER_PERIOD/2];
 static uint16_t PWM_Sin_Wave_Table[TABLE_SIZE];
 static uint16_t SPWM_MAX = 0;
 
 uint16_t sine_wave_get_dutycycle_maxval(void)
 {
     return SPWM_MAX;
+}
+
+
+/**
+  * @brief  init SPWM table
+  * @param  void
+  * @retval void
+  */
+void sine_wave_table_init(void)
+{
+    for(int i=0; i<SAMP_PER_PERIOD/2; i++) {
+        PWM_Sin_Table[i] = sin(PIx2 * i * SAMP_RATE) * 4096;
+    }
 }
 
 
@@ -35,11 +48,11 @@ void sine_wave_set_table(uint16_t max)
     
     for(i=0; i < SAMP_PER_PERIOD/2; i++) {
         //CH1
-        PWM_Sin_Wave_Table[i*2] = max * sin(PIx2 * i * SAMP_RATE);
+        PWM_Sin_Wave_Table[i*2] = max * PWM_Sin_Table[i] / 4096;
         PWM_Sin_Wave_Table[TABLE_SIZE/2 + i*2] = 0;
         //CH2
         PWM_Sin_Wave_Table[i*2+1] = 0;
-        PWM_Sin_Wave_Table[TABLE_SIZE/2+1 + i*2] = max * sin(PIx2 * i * SAMP_RATE);
+        PWM_Sin_Wave_Table[TABLE_SIZE/2+1 + i*2] = max * PWM_Sin_Table[i] / 4096;
     }
 }
 

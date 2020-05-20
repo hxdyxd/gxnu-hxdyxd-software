@@ -7,6 +7,9 @@
 #include <stdio.h>
 #include "data_interface_hal.h"
 
+#define FIRST_DOWNLOAD    (0)
+
+
 
 /* ADC CHANNEL */
 #define VRMS           (0)
@@ -27,13 +30,19 @@ struct adc_adjustment_t
 
 extern struct adc_adjustment_t value_adc_adjustment_key[ADC1_CHANNEL_NUMBER];
 
-
+//CAL
 struct param_t
 {
     double k;
     double b;
 };
 
+#define PARA_NUM   (3)
+#define PARA_CHANNEL_NUMBER  (ADC1_CHANNEL_NUMBER)
+extern struct param_t gs_para[PARA_CHANNEL_NUMBER];
+
+
+//PID
 typedef struct {
     float kp;
     float ki;
@@ -71,6 +80,27 @@ float value_adc_physical_set(float adc_voltage, int id);
 *******************************************************************************/
 void param_default_value_init(void);
 
+
+/*******************************************************************************
+* Function Name  : param_value_reset.
+* Description    : 
+* Input          : None.
+* Output         : None.
+* Return         : None.
+*******************************************************************************/
+void param_value_reset(float *x, float *y, int channel, uint8_t count);
+
+
+/*******************************************************************************
+* Function Name  : param_value_save.
+* Description    : 
+* Input          : None.
+* Output         : None.
+* Return         : None.
+*******************************************************************************/
+void param_value_save(void);
+
+
 /*******************************************************************************
 * Function Name  : get_param_value.
 * Description    : 
@@ -100,6 +130,7 @@ void pid_init(pidc_t *pid, float kp, float ki, float kd);
 *******************************************************************************/
 void pid_set_output_limit(pidc_t *pid, float max_output, float min_output);
 
+
 /*******************************************************************************
 * Function Name  : pid_set_value.
 * Description    : 
@@ -108,6 +139,7 @@ void pid_set_output_limit(pidc_t *pid, float max_output, float min_output);
 * Return         : None.
 *******************************************************************************/
 void pid_set_value(pidc_t *pid, float setval);
+
 
 /*******************************************************************************
 * Function Name  : pid_ctrl.
@@ -127,7 +159,6 @@ float pid_ctrl(pidc_t *pid, float curval);
 * Return         : None.
 *******************************************************************************/
 uint16_t No_Max_Min_Filter(uint16_t *in_dat, uint16_t num, uint8_t channel_num, uint8_t type);
-
 
 
 #endif

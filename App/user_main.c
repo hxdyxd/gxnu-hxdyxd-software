@@ -10,13 +10,17 @@
 
 #define MASTER     (1)
 //int cnt = 0;
-
+#define VOLTAGE_MAX   (15)
+#define CURRENT_MAX   (2)
 
 static struct gData_t global_data = {
     .rx_pack_cnt = 0,
     .lcd_page = LCD_PAGE_WELCOME,
+    .lcd_page_duty = LCD_PAGE_DUTY_DEFAULT,
     .dyty_cycle_max = 0,
     .dyty_cycle_min = PWM_MAX_V,
+    .output_max = 0,
+    .output_min = 10000.0,
 #if MASTER
     .is_master = 1,
     .is_sync = 0,
@@ -53,20 +57,28 @@ static struct gData_t global_data = {
 };
 uint8_t lost_cnt = 0;
 
+const float param_y_config[PARA_CHANNEL_NUMBER][PARA_NUM] = {
+    {5, 10, 15,},
+    {0.5, 1.0, 1.5,},
+};
 
 static void pid_controller_proc(void)
 {
+    static pidc_t *privous_pcontroller = &global_data.voltage_controller;
     float current_val;
     pidc_t *pcontroller = NULL;
     
-    if(global_data.is_voltage) {
+    if(global_data.is_voltage || !global_data.is_output) {
         current_val = GET_ADC(VRMS);
         pcontroller = &global_data.voltage_controller;
     } else {
         current_val = GET_ADC(IRMS);
         pcontroller = &global_data.current_controller;
     }
-    
+    if(pcontroller != privous_pcontroller) {
+        pcontroller->output = privous_pcontroller->output;
+        privous_pcontroller = pcontroller;
+    }
     
     uint16_t output = pid_ctrl(pcontroller, current_val);
     sine_wave_set_table(output);
@@ -75,6 +87,11 @@ static void pid_controller_proc(void)
         global_data.dyty_cycle_max = output;
     if(output < global_data.dyty_cycle_min)
         global_data.dyty_cycle_min = output;
+    
+    if(current_val > global_data.output_max)
+        global_data.output_max = current_val;
+    if(current_val < global_data.output_min)
+        global_data.output_min = current_val;
 }
 
 
@@ -108,7 +125,11 @@ static void lcd_flush_proc(void)
     case LCD_PAGE_OUTPUT_INFO:
         for(int i=0;i<ADC1_CHANNEL_NUMBER;i++) {
             if(!global_data.is_master && i == IRMS) {
-                lcd_printf(0, i, "%s:%.3f_%.3f", GET_ADC_INFO(i), GET_ADC(i), global_data.current_controller.setval);
+                if(global_data.is_voltage) {
+                    lcd_printf(0, i, "%s:%.3f_%.3f", GET_ADC_INFO(i), GET_ADC(i), global_data.voltage_controller.setval);
+                } else {
+                    lcd_printf(0, i, "%s:%.3f_%.3f", GET_ADC_INFO(i), GET_ADC(i), global_data.current_controller.setval);
+                }
             } else {
                 lcd_printf(0, i, "%s:%.3f", GET_ADC_INFO(i), GET_ADC(i) );
             }
@@ -133,9 +154,64 @@ static void lcd_flush_proc(void)
             break;
         }
 		break;
+    case LCD_PAGE_CAL:
+        switch(global_data.lcd_page_cal) {
+        case LCD_PAGE_CAL_DEFAULT:
+            lcd_printf(0, 0, "CAL_%s:%.3f", GET_ADC_INFO(0), GET_ADC(0));
+            lcd_printf(0, 1, "CAL_%s:%.3f", GET_ADC_INFO(1), GET_ADC(1));
+            break;
+        case LCD_PAGE_CAL_CH:
+            lcd_printf(0, 0, "CAL_CH:%s.%d", GET_ADC_INFO(global_data.lcd_cal_ch), global_data.lcd_cal_ch);
+            lcd_printf(0, 1, "K:%.2f, B:%.2f", 
+                gs_para[global_data.lcd_cal_ch].k,
+                gs_para[global_data.lcd_cal_ch].b
+            );
+            
+            break;
+        case LCD_PAGE_CAL_INDEX:
+            lcd_printf(0, 0, "CAL:%s,To %.2f", GET_ADC_INFO(global_data.lcd_cal_ch), global_data.para_y_div[global_data.lcd_cal_index]);
+            lcd_printf(0, 1, "CAL_%s:%.3f", GET_ADC_INFO(global_data.lcd_cal_ch), GET_ADC(global_data.lcd_cal_ch));
+            break;
+        case LCD_PAGE_CAL_OK:
+            lcd_printf(0, 0, "CAL_%s_OK:%.3f", GET_ADC_INFO(global_data.lcd_cal_ch), GET_ADC(global_data.lcd_cal_ch) );
+            lcd_printf(0, 1, "K:%.2f, B:%.2f", 
+                gs_para[global_data.lcd_cal_ch].k,
+                gs_para[global_data.lcd_cal_ch].b
+            );
+            break;
+        default:
+            lcd1602_clear();
+            break;
+        }
+        show_status = 0;
+        break;
+    case LCD_PAGE_DUTY:
+        switch(global_data.lcd_page_duty) {
+        case LCD_PAGE_DUTY_DEFAULT:
+            lcd_printf(0, 0, "Duty:%d-%d", global_data.dyty_cycle_min, global_data.dyty_cycle_max);
+            if(global_data.is_voltage) {
+                lcd_printf(0, 1, "%s:%.3f-%.3f", GET_ADC_INFO(0), global_data.output_min, global_data.output_max);
+            } else {
+                lcd_printf(0, 1, "%s:%.3f-%.3f", GET_ADC_INFO(1), global_data.output_min, global_data.output_max);
+            }
+            break;
+        case LCD_PAGE_DUTY_DIFF:
+            lcd_printf(0, 0, "Duty:%d", global_data.dyty_cycle_max - global_data.dyty_cycle_min);
+            if(global_data.is_voltage) {
+                lcd_printf(0, 1, "%s:%.3f", GET_ADC_INFO(0), global_data.output_max - global_data.output_min);
+            } else {
+                lcd_printf(0, 1, "%s:%.3f", GET_ADC_INFO(1), global_data.output_max - global_data.output_min);
+            }
+            break;
+        default:
+            lcd1602_clear();
+            break;
+        }
+        break;
     case LCD_PAGE_PKT:
-        lcd1602_clear();
         lcd_printf(0, 0, "PKT:%d", lost_cnt);
+        lcd_printf(0, 1, "CTL:%d", global_data.adc_cnt*2);
+        global_data.adc_cnt = 0;
         break;
     case LCD_PAGE_VER:
         lcd_printf(0, 0, "Date:%s", __DATE__);
@@ -180,6 +256,9 @@ static void lcd_flush_proc(void)
     global_data.dyty_cycle_min = PWM_MAX_V;
     global_data.dyty_cycle_max = 0;
     
+    global_data.output_min = 10000.0;
+    global_data.output_max = 0;
+    
     APP_DEBUG("status:%s\n", (global_data.is_master)?"M":"S");
    
 //    MATLAB DEBUG
@@ -199,6 +278,19 @@ static void lcd_flush_proc(void)
     LED_REV(LED_BASE2);
 }
 
+static void set_pid_value_in_cal_mode(void)
+{
+    if(global_data.is_master) {
+        if(global_data.lcd_cal_ch == IRMS) {
+            pid_set_value(&global_data.current_controller, global_data.voltage_cal_set );
+            global_data.is_voltage = 0;
+        } else if(global_data.lcd_cal_ch == VRMS) {
+            pid_set_value(&global_data.voltage_controller, global_data.voltage_cal_set );
+            global_data.is_voltage = 1;
+        }
+    }
+}
+
 
 static void usart_rx_callback(uint8_t *data, uint8_t len)
 {
@@ -211,6 +303,52 @@ static void usart_rx_callback(uint8_t *data, uint8_t len)
         case LCD_PAGE_SET:
             //page_set next
             global_data.lcd_page_set = (global_data.lcd_page_set + 1) % LCD_PAGE_SET_NUM;
+            break;
+        case LCD_PAGE_CAL:
+            //page cal next
+            switch(global_data.lcd_page_cal) {
+            case LCD_PAGE_CAL_DEFAULT:
+                if(global_data.is_master && global_data.is_voltage && !global_data.is_output) {
+                    global_data.lcd_page_cal = LCD_PAGE_CAL_CH;
+                    global_data.lcd_cal_ch = 0;
+                }
+                break;
+            case LCD_PAGE_CAL_CH:
+                global_data.lcd_page_cal = LCD_PAGE_CAL_INDEX;
+                global_data.lcd_cal_index = 0;
+                for(int i=0; i<PARA_NUM; i++) {
+                    global_data.para_y_div[i] = param_y_config[global_data.lcd_cal_ch][i];
+                }
+                global_data.voltage_cal_set = param_y_config[global_data.lcd_cal_ch][0];
+                set_pid_value_in_cal_mode();
+                global_data.is_output = 1;
+                set_output_status();
+                break;
+            case LCD_PAGE_CAL_INDEX:
+                global_data.para_x_div[global_data.lcd_cal_index] = global_data.voltage_cal_set;
+                global_data.lcd_cal_index++;
+                if(global_data.lcd_cal_index >= PARA_NUM) {
+                    global_data.lcd_page_cal = LCD_PAGE_CAL_OK;
+                    global_data.lcd_cal_index = 0;
+                    param_value_reset(global_data.para_x_div, global_data.para_y_div, global_data.lcd_cal_ch, PARA_NUM);
+                    global_data.is_output = 0;
+                    set_output_status();
+                } else {
+                    global_data.voltage_cal_set = param_y_config[global_data.lcd_cal_ch][global_data.lcd_cal_index];
+                    set_pid_value_in_cal_mode();
+                }
+                break;
+            case LCD_PAGE_CAL_OK:
+                param_value_save();
+                global_data.lcd_page_cal = LCD_PAGE_CAL_DEFAULT;
+                break;
+            default:
+                lcd1602_clear();
+                break;
+            }
+            break;
+        case LCD_PAGE_DUTY:
+            global_data.lcd_page_duty = (global_data.lcd_page_duty + 1) % LCD_PAGE_DUTY_NUM;
             break;
         default:
             break;
@@ -243,6 +381,34 @@ static void usart_rx_callback(uint8_t *data, uint8_t len)
             }
             set_pid_value_in_master_mode();
             break;
+        case LCD_PAGE_CAL:
+            switch(global_data.lcd_page_cal) {
+            case LCD_PAGE_CAL_DEFAULT:
+                //page previous
+                if(global_data.lcd_page == 0) {
+                    global_data.lcd_page = LCD_PAGE_NUM;
+                }
+                global_data.lcd_page--;
+                break;
+            case LCD_PAGE_CAL_CH:
+                if(global_data.lcd_cal_ch == 0) {
+                    global_data.lcd_cal_ch = PARA_CHANNEL_NUMBER;
+                }
+                global_data.lcd_cal_ch--;
+                break;
+            case LCD_PAGE_CAL_INDEX:
+                if(global_data.voltage_cal_set > 0) {
+                    global_data.voltage_cal_set -= global_data.lcd_cal_ch == IRMS ? 0.01 : 0.1;
+                    set_pid_value_in_cal_mode();
+                }
+                break;
+            case LCD_PAGE_CAL_OK:
+                global_data.lcd_page_cal = LCD_PAGE_CAL_DEFAULT;
+                break;
+            default:
+                break;
+            }
+            break;
         default:
             //page previous
             if(global_data.lcd_page == 0) {
@@ -263,18 +429,40 @@ static void usart_rx_callback(uint8_t *data, uint8_t len)
                 break;
             case LCD_PAGE_SET_VOLTAGE:
                 //voltage_set add
-                if(global_data.voltage_set < 15) {
+                if(global_data.voltage_set < VOLTAGE_MAX) {
                     global_data.voltage_set += 1;
                 }
                 break;
             case LCD_PAGE_SET_CURRENT:
                 //current_set add
-                if(global_data.current_set < 3) {
+                if(global_data.current_set < CURRENT_MAX) {
                     global_data.current_set += 0.1;
                 }
                 break;
             }
             set_pid_value_in_master_mode();
+            break;
+        case LCD_PAGE_CAL:
+            switch(global_data.lcd_page_cal) {
+            case LCD_PAGE_CAL_DEFAULT:
+                //page next
+                global_data.lcd_page = (global_data.lcd_page + 1) % LCD_PAGE_NUM;
+                break;
+            case LCD_PAGE_CAL_CH:
+                global_data.lcd_cal_ch = (global_data.lcd_cal_ch + 1) % PARA_CHANNEL_NUMBER;
+                break;
+            case LCD_PAGE_CAL_INDEX:
+                if(global_data.voltage_cal_set < VOLTAGE_MAX) {
+                    global_data.voltage_cal_set += global_data.lcd_cal_ch == IRMS ? 0.01 : 0.1;
+                    set_pid_value_in_cal_mode();
+                }
+                break;
+            case LCD_PAGE_CAL_OK:
+                global_data.lcd_page_cal = LCD_PAGE_CAL_DEFAULT;
+                break;
+            default:
+                break;
+            }
             break;
         default:
             //page next
@@ -283,7 +471,38 @@ static void usart_rx_callback(uint8_t *data, uint8_t len)
         }
         break;
     case 'c':
+        //exit
+        //ok
+        switch(global_data.lcd_page) {
+        case LCD_PAGE_SET:
+            global_data.lcd_page_set = LCD_PAGE_SET_DEFAULT;
+            break;
+        case LCD_PAGE_CAL:
+            switch(global_data.lcd_page_cal) {
+            case LCD_PAGE_CAL_DEFAULT:
+                break;
+            case LCD_PAGE_CAL_CH:
+                global_data.lcd_page_cal = LCD_PAGE_CAL_DEFAULT;
+                break;
+            case LCD_PAGE_CAL_INDEX:
+                global_data.lcd_page_cal = LCD_PAGE_CAL_DEFAULT;
+                global_data.is_output = 0;
+                global_data.is_voltage = 1;
+                set_output_status();
+                break;
+            case LCD_PAGE_CAL_OK:
+                global_data.lcd_page_cal = LCD_PAGE_CAL_DEFAULT;
+                break;
+            }
+            break;
+        default:
+            break;
+        }
+        break;
+    case 'd':
         //output set
+        if(global_data.lcd_page == LCD_PAGE_WELCOME || global_data.lcd_page == LCD_PAGE_VER || global_data.lcd_page == LCD_PAGE_CAL)
+            break;
         global_data.is_output = !global_data.is_output;
         if(!global_data.is_master && !global_data.is_sync) {
             //Slave must be synchronized
@@ -292,13 +511,17 @@ static void usart_rx_callback(uint8_t *data, uint8_t len)
         //update relay
         set_output_status();
         break;
-    case 'd':
+    case 'e':
         //master & slave set
+        if(global_data.lcd_page == LCD_PAGE_WELCOME || global_data.lcd_page == LCD_PAGE_VER || global_data.lcd_page == LCD_PAGE_CAL)
+            break;
         global_data.is_master = !global_data.is_master;
         fsk_comm_set_mode(/*global_data.is_master ? TX_FLAG :*/ RX_FLAG);
         break;
-    case 'e':
+    case 'f':
         //vlotage & current set
+        if(global_data.lcd_page == LCD_PAGE_WELCOME || global_data.lcd_page == LCD_PAGE_VER || global_data.lcd_page == LCD_PAGE_CAL)
+            break;
 		global_data.is_voltage = !global_data.is_voltage;
         break;
     default:
@@ -311,27 +534,23 @@ static void fsk_data_callback(uint8_t *data, uint16_t len)
 {
     global_data.rx_pack_cnt++;
     LED_REV(LED_BASE);
-    if(global_data.is_master) {
-        memset(data, 0, len);
-        uint16_t tmp = GET_ADC(IRMS)*1000;
-        data[0] = tmp >> 8;
-        data[1] = tmp & 0xff;
-        tmp = GET_ADC(VRMS)*1000;
-        data[2] = tmp >> 8;
-        data[3] = tmp & 0xff;
-        hal32_usart3_write(data, 4); //Send value to FSK Transmiter by USART3
-    } else {
+    if(!global_data.is_master) {
         uint16_t tmp = 0;
+        float set_value = 0;
         tmp = (data[0] << 8) | data[1];
-        if(!global_data.is_voltage) {
-                pid_set_value(&global_data.current_controller, tmp*0.001);
+        set_value = tmp *0.001;
+        if(fabs(global_data.current_controller.setval - set_value) < 0.2) {
+            set_value = global_data.current_controller.setval * 0.5 + set_value * 0.5;
         }
+        pid_set_value(&global_data.current_controller, set_value);
         //printf("Ims:%.3f\r\n", tmp*0.001);
 				
         tmp = (data[2] << 8) | data[3];
-        if(global_data.is_voltage) {
-                pid_set_value(&global_data.voltage_controller, tmp*0.001);
+        set_value = tmp *0.001;
+        if(fabs(GET_ADC(VRMS) - set_value) < 0.1) {
+            //set_value = global_data.voltage_controller.setval * 0.95 + set_value * 0.05;
         }
+        pid_set_value(&global_data.voltage_controller, set_value);
         //printf("Vms:%.3f\r\n", tmp*0.001);
         global_data.sync_keep_time = hal_read_TickCounter();
     }
@@ -340,6 +559,7 @@ static void fsk_data_callback(uint8_t *data, uint16_t len)
 
 static void adc_rx_callback(int id, void *pbuf, int len)
 {
+    global_data.adc_cnt++;
     ADC1_PBUF_TYPE adc1pbuf = (ADC1_PBUF_TYPE)pbuf;
     //Izero
     int zero = 0;
@@ -364,9 +584,15 @@ static void adc_rx_callback(int id, void *pbuf, int len)
     }
     float voltage_val = sqrt(sum*2/ADC1_CONV_NUMBER);
     
-    value_adc_physical_set(ADC_12BIT_VOLTAGE_CALCULATE(current_val), IRMS);
-    value_adc_physical_set(ADC_12BIT_VOLTAGE_CALCULATE(voltage_val), VRMS);
-    GET_ADC(VRMS) = GET_ADC(VRMS)*0.990+0.486;
+    current_val = ADC_12BIT_VOLTAGE_CALCULATE(current_val);
+    voltage_val = ADC_12BIT_VOLTAGE_CALCULATE(voltage_val);
+    
+    value_adc_physical_set(current_val, IRMS);
+    value_adc_physical_set(voltage_val, VRMS);
+    
+    GET_ADC(IRMS) = get_param_value(GET_ADC(IRMS), IRMS);
+    GET_ADC(VRMS) = get_param_value(GET_ADC(VRMS), VRMS);
+    
     
     //pid controller
     pid_controller_proc();
@@ -379,6 +605,16 @@ static void adc_rx_callback(int id, void *pbuf, int len)
 //        }
 //        global_data.adc_buffer_ready = 1;
 //    }
+    if(global_data.is_master) {
+        static uint8_t data[4] = {0,};
+        uint16_t tmp = GET_ADC(IRMS)*1000;
+        data[0] = tmp >> 8;
+        data[1] = tmp & 0xff;
+        tmp = GET_ADC(VRMS)*1000;
+        data[2] = tmp >> 8;
+        data[3] = tmp & 0xff;
+        hal32_usart3_write(data, 4); //Send value to FSK Transmiter by USART3
+    }
     TIMER_TASK(timer0, SYNC_TIMEOUT/4, (!global_data.is_master) ) {
         if(SYNC_TIMEOUT < hal_read_TickCounter() - global_data.sync_keep_time) {
             global_data.is_sync = 0;
@@ -408,6 +644,10 @@ void user_setup(void)
     fsk_comm_set_mode(/*global_data.is_master ? TX_FLAG :*/ RX_FLAG);
     set_pid_value_in_master_mode();  //update pid set value
     set_output_status(); //update relay
+    param_default_value_init();
+#if FIRST_DOWNLOAD
+    param_value_save();
+#endif
 }
 
 

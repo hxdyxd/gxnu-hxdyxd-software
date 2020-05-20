@@ -1,6 +1,7 @@
 /* 2019 06 25 */
 /* By hxdyxd */
 #include "adc_algorithm.h"
+#include "eeprom.h"
 
 /*
  * Hardware gain
@@ -8,11 +9,11 @@
 struct adc_adjustment_t value_adc_adjustment_key[ADC1_CHANNEL_NUMBER] = {
     [VRMS] = {
         .key = 1.0/(20 + 1),
-        .info = "Vrms",
+        .info = "V",
     },
     [IRMS] = {
         .key = 1.0/(10),
-        .info = "Irms",
+        .info = "I",
     },
 };
 
@@ -33,7 +34,7 @@ float value_adc_physical_set(float adc_voltage, int id)
 
 /*****************************************************************************/
 
-void polyfit1(float *x, float *y, uint16_t num, double *output_k, double *output_b)
+static void polyfit1(const float *x, const float *y, uint16_t num, double *output_k, double *output_b)
 {
     uint16_t i;
     double rx = num;
@@ -56,29 +57,74 @@ void polyfit1(float *x, float *y, uint16_t num, double *output_k, double *output
 /*
  * 采样校准参数
  */
-#define PARA_NUM   (2)
 
-float param_x_val[PARA_NUM] = {
-    0.391, 0.828, 
+const float param_x_val[PARA_CHANNEL_NUMBER][PARA_NUM] = {
+    {4.6, 9.2, 14.8,},
+    {1, 2, 3,},
 };
 
-float param_y_val[PARA_NUM] = { 
-    0.439, 0.874,
+const float param_y_val[PARA_CHANNEL_NUMBER][PARA_NUM] = {
+    {5, 10, 15,},
+    {1, 2, 3,},
 };
 
 
-struct param_t gs_para[ADC1_CHANNEL_NUMBER];
+struct param_t gs_para[PARA_CHANNEL_NUMBER];
+
 
 void param_default_value_init(void)
 {
-    for(int i=0; i<ADC1_CHANNEL_NUMBER; i++) {
-        polyfit1(param_x_val, param_y_val, PARA_NUM, &gs_para[i].k, &gs_para[i].b);
-        printf("ch %d k: %.3f, b: %.3f\r\n", i, gs_para[i].k, gs_para[i].b);
+#if !FIRST_DOWNLOAD
+    if(eeprom_read(0, (uint8_t *)&gs_para, sizeof(gs_para))) {
+        printf("eeprom_read ok\r\n");
+        uint8_t *para_u8 = ( uint8_t *)&gs_para;
+        for(int i=0; i<sizeof(gs_para); i++) {
+            if(i%8 == 0)
+                printf("\r\n");
+            printf("0x%02x, ", para_u8[i]);
+        }
+        printf("\r\n");
+        
+        for(int i=0; i<PARA_CHANNEL_NUMBER; i++) {
+            printf("ch %d k: %.3f, b: %.3f\r\n", i, gs_para[i].k, gs_para[i].b);
+        }
+    } else 
+#endif
+    {
+
+        printf("eeprom_read error\r\n");
+        for(int i=0; i<PARA_CHANNEL_NUMBER; i++) {
+            polyfit1(param_x_val[i], param_y_val[i], PARA_NUM, &gs_para[i].k, &gs_para[i].b);
+            printf("ch %d k: %.3f, b: %.3f\r\n", i, gs_para[i].k, gs_para[i].b);
+        }
     }
 }
 
-inline float get_param_value(float input, int i)
+
+void param_value_reset(float *x, float *y, int channel, uint8_t count)
 {
+    if(channel >= PARA_CHANNEL_NUMBER) {
+        return;
+    }
+    polyfit1(x, y, count, &gs_para[channel].k, &gs_para[channel].b);
+    printf("ch %d k: %.3f, b: %.3f\r\n", channel, gs_para[channel].k, gs_para[channel].b);
+}
+
+
+void param_value_save(void)
+{
+    printf("save param\r\n");
+    if(eeprom_write(0, (uint8_t *)&gs_para, sizeof(gs_para))) {
+        printf("eeprom_write ok %d\r\n", sizeof(gs_para));
+    }
+}
+
+
+float get_param_value(float input, int i)
+{
+    if(i >= PARA_CHANNEL_NUMBER) {
+        return 0;
+    }
     return (input * gs_para[i].k) + gs_para[i].b;
 }
 

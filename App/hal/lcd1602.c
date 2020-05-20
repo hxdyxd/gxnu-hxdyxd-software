@@ -2,9 +2,18 @@
 
 
 /*******************************/
+static void delay_nus(uint32_t n)
+{
+    while(n--) {
+        uint8_t i = 7;
+        while(i--);
+    }
+}
+
+
 #define  LCD_GPIO_READ(port, pin)              HAL_GPIO_ReadPin(port, pin)
 #define  LCD_GPIO_WRITE(port, pin, value)      HAL_GPIO_WritePin(port, pin, ((value)==0)?(GPIO_PIN_RESET):(GPIO_PIN_SET))
-#define  LCD_Delay(t)                       HAL_Delay(t)
+#define  LCD_Delay(t)                          delay_nus(t)
 
 struct tGpio {
     GPIO_TypeDef* GPIOx;
@@ -81,7 +90,7 @@ static inline void lcd1602_write_command(uint8_t data)
     LCD_GPIO_WRITE(LCD1602_PORT.LCD_RW.GPIOx, LCD1602_PORT.LCD_RW.GPIO_Pin, 0);
     LCD_GPIO_WRITE(LCD1602_PORT.LCD_RS.GPIOx, LCD1602_PORT.LCD_RS.GPIO_Pin, 0);
     lcd1602_write_byte(data);
-    LCD_Delay(3);
+    LCD_Delay(100);
 }
 
 static inline void lcd1602_write_data(uint8_t data)
@@ -90,7 +99,7 @@ static inline void lcd1602_write_data(uint8_t data)
     LCD_GPIO_WRITE(LCD1602_PORT.LCD_RW.GPIOx, LCD1602_PORT.LCD_RW.GPIO_Pin, 0);
     LCD_GPIO_WRITE(LCD1602_PORT.LCD_RS.GPIOx, LCD1602_PORT.LCD_RS.GPIO_Pin, 1);
     lcd1602_write_byte(data);
-    LCD_Delay(2);
+    LCD_Delay(100);
 }
 
 
